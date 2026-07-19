@@ -298,31 +298,44 @@
         s: Math.random() < 0.3 ? 2 : 1,
       });
   }
+  function attackAnchor(f, move) {
+    const spec =
+        f.move && f.state === move ? f.move : MOVES[f.type]?.[move] || f.move,
+      pose = fighterPose(f),
+      point = pose.points[spec?.joint] || pose.points.frontHand;
+    return {
+      x: f.x + point.x * f.face,
+      y: f.y + point.y,
+    };
+  }
   function castFx(f, move, hit = false) {
-    const kind = move.startsWith("light")
-      ? "light"
-      : move === "heavy"
-        ? "heavy"
-        : move === "special"
-          ? f.type === "chi"
-            ? "fireArc"
-            : "stoneWall"
-          : move === "ultimate"
-            ? f.type === "chi"
-              ? "wing"
-              : "pillar"
-            : "dash";
+    const spec =
+        f.move && f.state === move ? f.move : MOVES[f.type]?.[move] || f.move,
+      kind =
+        spec?.fx ||
+        (move.startsWith("light")
+          ? "jab"
+          : move === "heavy"
+            ? "roundKick"
+            : "dash"),
+      anchor = attackAnchor(f, move);
     effects.push({
       kind,
-      x: f.x + f.face * (hit ? 18 : 12),
-      y: f.y - (kind === "heavy" ? 8 : 32),
+      move,
+      owner: hit ? null : f,
+      x: anchor.x,
+      y: anchor.y,
       face: f.face,
       t: 0,
       max:
-        kind === "light"
+        kind === "jab"
           ? 10
-          : kind === "heavy"
-            ? 22
+          : kind === "cross" || kind === "uppercut"
+            ? 14
+            : kind === "roundKick" || kind === "airKick"
+              ? 22
+              : kind === "quakeKick"
+                ? 28
             : kind === "stoneWall"
               ? 34
               : kind === "fireArc"
@@ -333,28 +346,59 @@
     if (effects.length > 48) effects.shift();
   }
   function drawFx(e) {
-    const q = e.t / e.max,
-      x = Math.round(e.x),
-      y = Math.round(e.y),
+    const anchor =
+        e.owner?.move && e.owner.state === e.move
+          ? attackAnchor(e.owner, e.move)
+          : e,
+      q = e.t / e.max,
+      x = Math.round(anchor.x),
+      y = Math.round(anchor.y),
       d = e.face;
     ctx.save();
     ctx.globalAlpha = Math.max(0, 1 - q);
-    if (e.kind === "light") {
+    if (e.kind === "jab") {
       for (let i = 0; i < 4; i++)
-        rect(x + d * (i * 5 + q * 8), y - 5 + i * 3, 8 - i, 1, e.col);
-    } else if (e.kind === "heavy") {
+        rect(x - d * (i * 5 + q * 7), y - 3 + i * 2, 7 - i, 1, e.col);
+      rect(x - 2, y - 2, 5, 5, "#f6edcf");
+    } else if (e.kind === "cross") {
       for (let i = 0; i < 5; i++) {
-        const w = 10 + i * 10 + q * 18;
-        rect(x - w / 2, y + i * 3, w, 2, i % 2 ? e.col : "#d8eef0");
+        rect(
+          x - d * (i * 5 + q * 8),
+          y - 8 + i * 3,
+          8 - i,
+          1,
+          i % 2 ? e.col : "#eaf7f3",
+        );
       }
+      rect(x - d * 4, y - 7, 2, 14, e.col);
+    } else if (e.kind === "uppercut") {
       for (let i = 0; i < 7; i++)
         rect(
-          x + (i - 3) * 7,
-          y - 4 - Math.abs(i - 3) * 2 - q * 12,
+          x - d * (7 - i * 2),
+          y + 10 - i * 4 - q * 9,
+          3 + (i % 2),
           2,
-          7,
-          e.col,
+          i % 2 ? e.col : "#ffe5a8",
         );
+    } else if (e.kind === "roundKick" || e.kind === "airKick") {
+      for (let i = 0; i < 9; i++) {
+        const angle = -1.9 + i * 0.22,
+          radius = 14 + i * 2 + q * 8;
+        rect(
+          x + d * Math.cos(angle) * radius,
+          y + Math.sin(angle) * radius * 0.55,
+          4,
+          2,
+          i % 2 ? e.col : "#ffd36b",
+        );
+      }
+    } else if (e.kind === "quakeKick") {
+      rect(x - 4, y - 3, 11, 5, "#d9f4f2");
+      for (let i = 0; i < 7; i++) {
+        const dx = d * (5 + i * 5 + q * 12);
+        rect(x + dx, y + 2 + (i % 3) * 3, 4, 3, i % 2 ? e.col : "#6edce3");
+        rect(x + dx + d * 2, y + 6 + (i % 2) * 3, 2, 5, "#39586a");
+      }
     } else if (e.kind === "fireArc") {
       for (let i = 0; i < 9; i++) {
         const px = x + d * (i * 5 + q * 18),
@@ -372,6 +416,15 @@
         );
         rect(x + d * (8 + q * 9), y - 2 - i * 7, 2, 4, "#dff6f4");
       }
+    } else if (e.kind === "dash") {
+      for (let i = 0; i < 8; i++)
+        rect(
+          x - d * (10 + i * 7 + q * 20),
+          y - 12 + (i % 4) * 6,
+          10 + (i % 3) * 3,
+          1,
+          i % 2 ? e.col : "#dcecee",
+        );
     } else if (e.kind === "wing") {
       for (let s of [-1, 1])
         for (let i = 0; i < 8; i++)
@@ -400,6 +453,11 @@
     chi: {
       light1: {
         n: "流火掌 一",
+        key: "J",
+        joint: "frontHand",
+        hitW: 15,
+        hitH: 12,
+        fx: "jab",
         len: 19,
         a: 5,
         b: 8,
@@ -410,6 +468,11 @@
       },
       light2: {
         n: "流火掌 二",
+        key: "J",
+        joint: "backHand",
+        hitW: 16,
+        hitH: 13,
+        fx: "cross",
         len: 20,
         a: 5,
         b: 9,
@@ -418,9 +481,27 @@
         k: 30,
         next: "light3",
       },
-      light3: { n: "流火掌 三", len: 25, a: 7, b: 11, d: 55, p: 28, k: 55 },
+      light3: {
+        n: "流火掌 三",
+        key: "J",
+        joint: "frontHand",
+        hitW: 18,
+        hitH: 16,
+        fx: "uppercut",
+        len: 25,
+        a: 7,
+        b: 11,
+        d: 55,
+        p: 28,
+        k: 55,
+      },
       heavy: {
-        n: "赤羽破",
+        n: "赤羽回旋踢",
+        key: "K",
+        joint: "frontFoot",
+        hitW: 23,
+        hitH: 16,
+        fx: "roundKick",
         len: 38,
         a: 15,
         b: 20,
@@ -431,7 +512,12 @@
         down: 1,
       },
       special: {
-        n: "鸢返",
+        n: "鸢返焰掌",
+        key: "L",
+        joint: "frontHand",
+        hitW: 28,
+        hitH: 24,
+        fx: "fireArc",
         len: 34,
         a: 9,
         b: 18,
@@ -443,6 +529,10 @@
       },
       dash: {
         n: "追风掌",
+        joint: "frontHand",
+        hitW: 20,
+        hitH: 17,
+        fx: "dash",
         len: 27,
         a: 8,
         b: 13,
@@ -451,9 +541,25 @@
         k: 58,
         dash: 110,
       },
-      air: { n: "掠羽踢", len: 27, a: 6, b: 15, d: 58, p: 28, k: 48 },
+      air: {
+        n: "掠羽踢",
+        joint: "frontFoot",
+        hitW: 21,
+        hitH: 17,
+        fx: "airKick",
+        len: 27,
+        a: 6,
+        b: 15,
+        d: 58,
+        p: 28,
+        k: 48,
+      },
       ultimate: {
         n: "百羽燎原",
+        joint: "frontHand",
+        hitW: 58,
+        hitH: 42,
+        fx: "wing",
         len: 142,
         a: 34,
         b: 98,
@@ -467,6 +573,11 @@
     xuan: {
       light1: {
         n: "碎岩拳 一",
+        key: "J",
+        joint: "frontHand",
+        hitW: 17,
+        hitH: 14,
+        fx: "jab",
         len: 24,
         a: 7,
         b: 11,
@@ -475,9 +586,27 @@
         k: 35,
         next: "light2",
       },
-      light2: { n: "碎岩拳 二", len: 29, a: 9, b: 14, d: 62, p: 31, k: 52 },
+      light2: {
+        n: "碎岩拳 二",
+        key: "J",
+        joint: "backHand",
+        hitW: 19,
+        hitH: 15,
+        fx: "cross",
+        len: 29,
+        a: 9,
+        b: 14,
+        d: 62,
+        p: 31,
+        k: 52,
+      },
       heavy: {
-        n: "镇岳击",
+        n: "镇岳崩踢",
+        key: "K",
+        joint: "frontFoot",
+        hitW: 27,
+        hitH: 19,
+        fx: "quakeKick",
         len: 46,
         a: 19,
         b: 25,
@@ -488,7 +617,12 @@
         down: 1,
       },
       special: {
-        n: "玄壁",
+        n: "玄壁震掌",
+        key: "L",
+        joint: "frontHand",
+        hitW: 31,
+        hitH: 34,
+        fx: "stoneWall",
         len: 44,
         a: 4,
         b: 32,
@@ -500,6 +634,10 @@
       },
       dash: {
         n: "铁山靠",
+        joint: "frontHand",
+        hitW: 24,
+        hitH: 22,
+        fx: "dash",
         len: 34,
         a: 12,
         b: 18,
@@ -509,9 +647,26 @@
         dash: 85,
         heavy: 1,
       },
-      air: { n: "坠岩拳", len: 34, a: 8, b: 19, d: 74, p: 35, k: 60, down: 1 },
+      air: {
+        n: "坠岩踢",
+        joint: "frontFoot",
+        hitW: 24,
+        hitH: 20,
+        fx: "quakeKick",
+        len: 34,
+        a: 8,
+        b: 19,
+        d: 74,
+        p: 35,
+        k: 60,
+        down: 1,
+      },
       ultimate: {
         n: "天柱坠",
+        joint: "frontHand",
+        hitW: 64,
+        hitH: 52,
+        fx: "pillar",
         len: 154,
         a: 38,
         b: 110,
@@ -766,21 +921,26 @@
     box() {
       const m = this.move;
       if (!m || this.frame < m.a || this.frame > m.b) return null;
-      const reach =
-        this.type === "chi" ? (m.ultimate ? 54 : 31) : m.ultimate ? 58 : 40;
+      const pose = fighterPose(this),
+        point = pose.points[m.joint] || pose.points.frontHand,
+        w = m.hitW || (m.heavy ? 22 : 15),
+        h = m.hitH || (m.heavy ? 18 : 13),
+        centerX = this.x + point.x * this.face,
+        centerY = this.y + point.y;
       return {
-        x: this.face > 0 ? this.x + 7 : this.x - reach - 7,
-        y: this.y - (m.down ? 24 : 42),
-        w: reach,
-        h: m.down ? 28 : 31,
+        x: centerX - w / 2,
+        y: centerY - h / 2,
+        w,
+        h,
       };
     }
     hurt() {
+      const crouching = this.state === "crouch";
       return {
-        x: this.x - 9,
-        y: this.y - (this.state === "crouch" ? 27 : 48),
-        w: 18,
-        h: this.state === "crouch" ? 27 : 48,
+        x: this.x - (this.type === "xuan" ? 11 : 10),
+        y: this.y - (crouching ? 37 : 62),
+        w: this.type === "xuan" ? 22 : 20,
+        h: crouching ? 37 : 62,
       };
     }
   }
@@ -1430,7 +1590,7 @@
     },
     select() {
       this.show(
-        `<h1 class="logo">选择武者</h1><p class="subtitle">截然不同的进攻节奏</p><div class="row"><button class="portrait ${Game.playerType === "chi" ? "selected" : ""}" data-char="chi"><span class="fighter-mark chi-mark" aria-hidden="true"></span><h2 class="red">赤鸢</h2><p>高速近战 · 连续压迫</p><div class="stats">速度 S　攻击 B<br>防御 C　技巧 A</div><div class="signature">流火掌 / 赤羽破 / 百羽燎原</div></button><button class="portrait ${Game.playerType === "xuan" ? "selected" : ""}" data-char="xuan"><span class="fighter-mark xuan-mark" aria-hidden="true"></span><h2 class="cyan">玄嶂</h2><p>力量防御 · 架势反击</p><div class="stats">速度 C　攻击 S<br>防御 S　技巧 B</div><div class="signature">碎岩拳 / 玄壁 / 天柱坠</div></button></div><div class="menu" style="margin-top:12px"><button id="confirm">确认并返回</button></div>`,
+        `<h1 class="logo">选择武者</h1><p class="subtitle">截然不同的进攻节奏</p><div class="row"><button class="portrait ${Game.playerType === "chi" ? "selected" : ""}" data-char="chi"><span class="fighter-mark chi-mark" aria-hidden="true"></span><h2 class="red">赤鸢</h2><p>高速近战 · 连续压迫</p><div class="stats">速度 S　攻击 B<br>防御 C　技巧 A</div><div class="signature">流火掌 / 赤羽回旋踢 / 鸢返焰掌</div></button><button class="portrait ${Game.playerType === "xuan" ? "selected" : ""}" data-char="xuan"><span class="fighter-mark xuan-mark" aria-hidden="true"></span><h2 class="cyan">玄嶂</h2><p>力量防御 · 架势反击</p><div class="stats">速度 C　攻击 S<br>防御 S　技巧 B</div><div class="signature">碎岩拳 / 镇岳崩踢 / 玄壁震掌</div></button></div><div class="menu" style="margin-top:12px"><button id="confirm">确认并返回</button></div>`,
       );
       screen.querySelectorAll("[data-char]").forEach(
         (e) =>
@@ -1457,7 +1617,7 @@
     controls(returnTo = "menu") {
       Game.overlayReturn = returnTo;
       this.show(
-        `<h1 class="logo">操作说明</h1><div class="help"><p><kbd>A</kbd> <kbd>D</kbd> 移动　<kbd>W</kbd> 跳跃　<kbd>S</kbd> 低姿态</p><p><kbd>Shift</kbd> + 方向或双击方向：冲刺 / 撤步</p><p><kbd>J</kbd> 轻攻击　<kbd>K</kbd> 重攻击　<kbd>L</kbd> 特殊技</p><p><kbd>I</kbd> 防御，按下瞬间可完美防御　<kbd>U</kbd> 满能终结技</p><p><kbd>Esc</kbd> 暂停　<kbd>R</kbd> 结算后再次挑战</p><p class="tiny">手柄：摇杆移动，A跳跃，X/Y/B轻击/重击/特殊，LB防御，RB终结技。</p></div><div class="menu"><button id="training">进入实战教学</button><button id="back">返回</button></div>`,
+        `<h1 class="logo">操作说明</h1><div class="help"><p><kbd>A</kbd> <kbd>D</kbd> 移动　<kbd>W</kbd> 跳跃　<kbd>S</kbd> 低姿态</p><p><kbd>Shift</kbd> + 方向或双击方向：冲刺 / 撤步</p><p><kbd>J</kbd> 手部连拳　<kbd>K</kbd> 腿部重踢　<kbd>L</kbd> 角色专属技</p><p><kbd>I</kbd> 防御，按下瞬间可完美防御　<kbd>U</kbd> 满能终结技</p><p><kbd>Esc</kbd> 暂停　<kbd>R</kbd> 结算后再次挑战</p><p class="tiny">招式判定跟随拳头或脚尖；手柄：X 连拳，Y 重踢，B 专属技，LB 防御，RB 终结技。</p></div><div class="menu"><button id="training">进入实战教学</button><button id="back">返回</button></div>`,
       );
       screen.querySelector("#training").onclick = () => Game.startTutorial();
       screen.querySelector("#back").onclick = () => Game.closeOverlay();
@@ -1642,85 +1802,434 @@
       rect(x + 5, 203, 18, 1, "#183642");
     }
   }
-  function limb(x, y, w, h, c) {
-    rect(x, y, w, h, "#05090e");
-    rect(x + 1, y + 1, w - 2, h - 2, c);
+  function smoothStep(value) {
+    const t = clamp(value, 0, 1);
+    return t * t * (3 - 2 * t);
+  }
+  function jointPoint(origin, length, angle) {
+    return {
+      x: origin.x + Math.cos(angle) * length,
+      y: origin.y + Math.sin(angle) * length,
+    };
+  }
+  function moveMotion(f) {
+    const m = f.move;
+    if (!m) return { coil: 0, strike: 0 };
+    if (f.frame < m.a)
+      return { coil: smoothStep(f.frame / Math.max(1, m.a)), strike: 0 };
+    if (f.frame <= m.b) {
+      const strike = smoothStep(
+        (f.frame - m.a + 1) / Math.max(1, m.b - m.a + 1),
+      );
+      return { coil: 1 - strike, strike };
+    }
+    return {
+      coil: 0,
+      strike:
+        1 -
+        smoothStep((f.frame - m.b) / Math.max(1, m.len - m.b)),
+    };
+  }
+  function fighterPose(f) {
+    const phase = Math.sin(f.frame * 0.16),
+      xuan = f.type === "xuan",
+      pose = {
+        pelvisX: 0,
+        pelvisY: xuan ? -23 : -22,
+        chestX: 0,
+        chestY: xuan ? -42 : -40,
+        frontUpperArm: 0.82,
+        frontLowerArm: -0.72,
+        backUpperArm: 2.22,
+        backLowerArm: -0.22,
+        frontUpperLeg: 1.33,
+        frontLowerLeg: 1.47,
+        backUpperLeg: 1.8,
+        backLowerLeg: 1.62,
+      },
+      set = (key, value, amount = 1) =>
+        (pose[key] = lerp(pose[key], value, amount));
+
+    if (f.state === "walk" || f.state === "dashMove") {
+      const stride = phase * (f.state === "dashMove" ? 0.62 : 0.36);
+      pose.frontUpperLeg += stride;
+      pose.backUpperLeg -= stride;
+      pose.frontUpperArm -= stride * 0.75;
+      pose.backUpperArm += stride * 0.75;
+      pose.pelvisY += Math.abs(phase) * 1.2;
+      pose.chestX = f.state === "dashMove" ? 4 : phase;
+    }
+    if (!f.grounded || ["jump", "air"].includes(f.state)) {
+      pose.frontUpperLeg = 0.45;
+      pose.frontLowerLeg = 1.35;
+      pose.backUpperLeg = 2.45;
+      pose.backLowerLeg = 1.78;
+      pose.frontUpperArm = -0.45;
+      pose.frontLowerArm = 0.35;
+      pose.backUpperArm = 2.55;
+      pose.backLowerArm = 2.9;
+      pose.chestX = 2;
+    }
+    if (f.state === "crouch") {
+      pose.pelvisY = -15;
+      pose.chestY = -31;
+      pose.chestX = 3;
+      pose.frontUpperLeg = 0.42;
+      pose.frontLowerLeg = 2.05;
+      pose.backUpperLeg = 2.6;
+      pose.backLowerLeg = 1.1;
+    }
+    if (f.state === "guard" || f.state === "parry") {
+      pose.frontUpperArm = -0.42;
+      pose.frontLowerArm = 0.28;
+      pose.backUpperArm = 0.18;
+      pose.backLowerArm = -0.55;
+      pose.frontUpperLeg = 1.18;
+      pose.backUpperLeg = 1.98;
+      pose.chestX = -2;
+    }
+    if (["hit", "break"].includes(f.state) || f.hitstun > 0) {
+      pose.chestX = -6;
+      pose.frontUpperArm = 2.62;
+      pose.frontLowerArm = 2.95;
+      pose.backUpperArm = -2.55;
+      pose.backLowerArm = -2.95;
+      pose.frontUpperLeg = 1.6;
+      pose.backUpperLeg = 1.45;
+    }
+    if (f.state === "win") {
+      pose.frontUpperArm = -1.55;
+      pose.frontLowerArm = -1.22;
+      pose.backUpperArm = -1.72;
+      pose.backLowerArm = -1.95;
+      pose.chestX = 2;
+    }
+
+    if (f.move) {
+      const motion = moveMotion(f),
+        coil = motion.coil,
+        strike = motion.strike,
+        action = f.state,
+        moveSet = (key, coilValue, strikeValue) => {
+          set(key, coilValue, coil);
+          set(key, strikeValue, strike);
+        };
+      if (action === "light1") {
+        moveSet("frontUpperArm", 1.28, -0.08);
+        moveSet("frontLowerArm", -1.22, 0.02);
+        moveSet("chestX", -2, 3);
+      } else if (action === "light2") {
+        moveSet("backUpperArm", 2.72, 0.04);
+        moveSet("backLowerArm", -1.32, -0.03);
+        moveSet("chestX", -3, 4);
+        set("frontUpperArm", -0.28, strike * 0.8);
+        set("frontLowerArm", 0.38, strike * 0.8);
+      } else if (action === "light3") {
+        moveSet("frontUpperArm", 1.58, -0.95);
+        moveSet("frontLowerArm", -1.45, -0.38);
+        moveSet("chestX", -3, 4);
+        set("frontUpperLeg", 1.08, strike);
+      } else if (action === "heavy") {
+        moveSet("frontUpperLeg", -0.62, xuan ? -0.03 : -0.22);
+        moveSet("frontLowerLeg", 1.08, xuan ? 0.02 : 0.12);
+        moveSet("chestX", 2, xuan ? -7 : -5);
+        set("frontUpperArm", 2.5, strike);
+        set("frontLowerArm", 2.9, strike);
+        set("backUpperArm", -0.42, strike);
+        set("backLowerArm", 0.48, strike);
+      } else if (action === "special" && f.type === "chi") {
+        moveSet("frontUpperArm", 1.72, -0.58);
+        moveSet("frontLowerArm", 1.2, 0.08);
+        moveSet("backUpperArm", 2.68, -1.85);
+        moveSet("backLowerArm", 2.9, -2.42);
+        moveSet("chestX", -4, 7);
+        set("frontUpperLeg", 0.72, strike);
+        set("frontLowerLeg", 1.72, strike);
+      } else if (action === "special") {
+        moveSet("frontUpperArm", -0.58, 0.08);
+        moveSet("frontLowerArm", 0.72, 0.02);
+        moveSet("backUpperArm", -0.2, 0.34);
+        moveSet("backLowerArm", -0.72, 0.04);
+        moveSet("chestX", -5, 3);
+        set("frontUpperLeg", 1.02, strike);
+        set("backUpperLeg", 2.12, strike);
+      } else if (action === "dash") {
+        moveSet("frontUpperArm", 1.2, -0.04);
+        moveSet("frontLowerArm", -1.1, 0.01);
+        moveSet("chestX", -2, 8);
+        set("backUpperArm", 2.8, strike);
+        set("backLowerArm", 2.9, strike);
+      } else if (action === "air") {
+        moveSet("frontUpperLeg", 0.8, 0.14);
+        moveSet("frontLowerLeg", 1.55, 0.36);
+        set("backUpperLeg", 2.58, strike);
+        set("backLowerLeg", 1.9, strike);
+        set("chestX", -4, strike);
+      } else if (action === "ultimate" && f.type === "chi") {
+        const flutter = Math.sin(f.frame * 0.42) * 0.32;
+        set("frontUpperArm", -0.58 + flutter, Math.max(coil, strike));
+        set("frontLowerArm", -0.08 - flutter, Math.max(coil, strike));
+        set("backUpperArm", 0.58 - flutter, Math.max(coil, strike));
+        set("backLowerArm", 0.08 + flutter, Math.max(coil, strike));
+        set("chestX", 7, strike);
+      } else if (action === "ultimate") {
+        moveSet("frontUpperArm", -1.5, 0.34);
+        moveSet("frontLowerArm", -1.3, 0.92);
+        moveSet("backUpperArm", -1.7, 2.78);
+        moveSet("backLowerArm", -1.9, 2.3);
+        set("frontUpperLeg", 1.05, strike);
+        set("backUpperLeg", 2.08, strike);
+        set("chestX", 5, strike);
+      }
+    }
+
+    const armUpper = xuan ? 11.5 : 10.5,
+      armLower = xuan ? 11 : 10.5,
+      legUpper = xuan ? 13.5 : 12.5,
+      legLower = xuan ? 13.5 : 12.5,
+      footLength = xuan ? 7 : 6,
+      pelvis = { x: pose.pelvisX, y: pose.pelvisY },
+      chest = { x: pose.chestX, y: pose.chestY },
+      neck = { x: chest.x + 0.5, y: chest.y - 5 },
+      head = { x: neck.x + 0.8, y: neck.y - (xuan ? 7 : 6.5) },
+      frontShoulder = { x: chest.x + 1.8, y: chest.y + 1 },
+      backShoulder = { x: chest.x - 1.8, y: chest.y + 2 },
+      frontHip = { x: pelvis.x + 2, y: pelvis.y },
+      backHip = { x: pelvis.x - 2, y: pelvis.y + 1 },
+      frontElbow = jointPoint(
+        frontShoulder,
+        armUpper,
+        pose.frontUpperArm,
+      ),
+      frontHand = jointPoint(
+        frontElbow,
+        armLower,
+        pose.frontLowerArm,
+      ),
+      backElbow = jointPoint(backShoulder, armUpper, pose.backUpperArm),
+      backHand = jointPoint(backElbow, armLower, pose.backLowerArm),
+      frontKnee = jointPoint(frontHip, legUpper, pose.frontUpperLeg),
+      frontAnkle = jointPoint(frontKnee, legLower, pose.frontLowerLeg),
+      backKnee = jointPoint(backHip, legUpper, pose.backUpperLeg),
+      backAnkle = jointPoint(backKnee, legLower, pose.backLowerLeg),
+      frontKick = f.move?.joint === "frontFoot",
+      frontFoot = jointPoint(
+        frontAnkle,
+        footLength,
+        frontKick ? pose.frontLowerLeg : 0.04,
+      ),
+      backFoot = jointPoint(backAnkle, footLength, 0.04);
+
+    if (f.grounded && !frontKick) {
+      frontAnkle.y = Math.min(frontAnkle.y, -1);
+      frontFoot.y = Math.min(frontFoot.y, 0);
+      backAnkle.y = Math.min(backAnkle.y, -1);
+      backFoot.y = Math.min(backFoot.y, 0);
+    }
+    return {
+      pose,
+      points: {
+        pelvis,
+        chest,
+        neck,
+        head,
+        frontShoulder,
+        backShoulder,
+        frontElbow,
+        backElbow,
+        frontHand,
+        backHand,
+        frontHip,
+        backHip,
+        frontKnee,
+        backKnee,
+        frontAnkle,
+        backAnkle,
+        frontFoot,
+        backFoot,
+      },
+    };
+  }
+  function strokeSegment(from, to, width, color, shine = true) {
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.beginPath();
+    ctx.moveTo(from.x, from.y);
+    ctx.lineTo(to.x, to.y);
+    ctx.strokeStyle = "#03070c";
+    ctx.lineWidth = width + 2.5;
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(from.x, from.y);
+    ctx.lineTo(to.x, to.y);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = width;
+    ctx.stroke();
+    if (shine) {
+      ctx.save();
+      ctx.globalAlpha *= 0.28;
+      ctx.beginPath();
+      ctx.moveTo(from.x - 0.5, from.y - 0.5);
+      ctx.lineTo(to.x - 0.5, to.y - 0.5);
+      ctx.strokeStyle = "#ffffff";
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      ctx.restore();
+    }
+  }
+  function drawJoint(point, radius, color) {
+    ctx.beginPath();
+    ctx.arc(point.x, point.y, radius + 1.1, 0, Math.PI * 2);
+    ctx.fillStyle = "#03070c";
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(point.x, point.y, radius, 0, Math.PI * 2);
+    ctx.fillStyle = color;
+    ctx.fill();
+    ctx.globalAlpha *= 0.35;
+    ctx.beginPath();
+    ctx.arc(point.x - 0.8, point.y - 0.8, Math.max(0.7, radius * 0.35), 0, Math.PI * 2);
+    ctx.fillStyle = "#ffffff";
+    ctx.fill();
+    ctx.globalAlpha /= 0.35;
+  }
+  function drawArm(points, side, width, color, handColor) {
+    const shoulder = points[`${side}Shoulder`],
+      elbow = points[`${side}Elbow`],
+      hand = points[`${side}Hand`];
+    strokeSegment(shoulder, elbow, width, color);
+    strokeSegment(elbow, hand, width - 0.35, color);
+    drawJoint(elbow, width * 0.58, color);
+    drawJoint(hand, width * 0.78, handColor);
+  }
+  function drawLeg(points, side, width, color, footColor) {
+    const hip = points[`${side}Hip`],
+      knee = points[`${side}Knee`],
+      ankle = points[`${side}Ankle`],
+      foot = points[`${side}Foot`];
+    strokeSegment(hip, knee, width, color);
+    strokeSegment(knee, ankle, width - 0.2, color);
+    strokeSegment(ankle, foot, width + 0.8, footColor);
+    drawJoint(knee, width * 0.58, color);
+    drawJoint(foot, width * 0.62, footColor);
+  }
+  function drawHead(point, radius, f) {
+    ctx.beginPath();
+    ctx.arc(point.x, point.y, radius + 1.4, 0, Math.PI * 2);
+    ctx.fillStyle = "#02060b";
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(point.x, point.y, radius, 0, Math.PI * 2);
+    ctx.fillStyle = f.type === "chi" ? "#d79b79" : "#b88f78";
+    ctx.fill();
+    ctx.save();
+    ctx.globalAlpha = 0.28;
+    ctx.beginPath();
+    ctx.arc(point.x - 1.5, point.y + 1, radius * 0.86, -Math.PI / 2, Math.PI / 2);
+    ctx.fillStyle = "#371b21";
+    ctx.fill();
+    ctx.restore();
+    rect(point.x + radius * 0.35, point.y - 1, 2, 1, "#f5f5df");
+    if (f.type === "chi") {
+      rect(point.x - radius - 1, point.y - radius + 1, radius * 2 + 2, 3, "#2a1118");
+      rect(point.x - radius - 6, point.y - radius + 2, 6, 2, f.cfg.col);
+    } else {
+      rect(point.x - radius - 1, point.y - radius, radius * 2 + 2, 4, "#253845");
+      rect(point.x + radius - 2, point.y - radius + 1, 3, 4, f.cfg.accent);
+    }
   }
   function fighter(f) {
-    let x = Math.round(f.x),
+    const x = Math.round(f.x),
       y = Math.round(f.y),
       flip = f.face,
-      phase = Math.sin(f.frame * 0.13),
-      hurt = f.state === "hit" || f.state === "break",
-      c = f.cfg.col,
-      a = f.cfg.accent;
+      model = fighterPose(f),
+      p = model.points,
+      xuan = f.type === "xuan",
+      front = f.cfg.col,
+      back = xuan ? "#173d4a" : "#562329",
+      core = xuan ? "#286675" : "#8e3034",
+      skin = xuan ? "#b88f78" : "#d79b79",
+      foot = xuan ? "#57d2dc" : "#dc493d",
+      limbWidth = xuan ? 4.4 : 3.6,
+      backStrike = f.move?.joint === "backHand";
+
+    ctx.save();
+    ctx.translate(x, FLOOR + 1);
+    ctx.scale(1, 0.38);
+    ctx.beginPath();
+    ctx.arc(0, 0, xuan ? 16 : 14, 0, Math.PI * 2);
+    ctx.fillStyle = f.grounded ? "#00000070" : "#00000038";
+    ctx.fill();
+    ctx.restore();
+
     ctx.save();
     ctx.translate(x, y);
     ctx.scale(flip, 1);
     if (f.invuln && f.invuln % 4 < 2) ctx.globalAlpha = 0.4;
-    let crouch = f.state === "crouch" ? 8 : 0,
-      lean =
-        f.state === "walk"
-          ? phase * 2
-          : f.move
-            ? f.frame < f.move.a
-              ? -3
-              : f.frame <= f.move.b
-                ? 5
-                : 0
-            : 0;
     if (f.state === "down" || f.state === "ko") {
       ctx.rotate((-Math.PI / 2) * flip);
       ctx.translate(28, -5);
     }
-    if (f.state === "win") lean = -2;
-    if (hurt) lean = -5;
-    limb(-8, -18 + crouch, 6, 18, "#17202b");
-    limb(3, -18 + crouch, 7, 18, f.type === "chi" ? "#2a1b20" : "#142c3d");
-    limb(
-      -9,
-      -39 + crouch + lean,
-      18,
-      24,
-      f.type === "chi" ? "#4a2024" : "#17384b",
-    );
-    rect(-7, -37 + crouch + lean, 14, 3, c);
-    if (f.type === "chi") {
-      rect(-10, -38 + crouch + lean, 4, 18, "#1a1218");
-      rect(7, -35 + crouch + lean, 3, 21, "#9d302d");
-      rect(10, -18 + crouch + lean, 8 + Math.abs(phase * 7), 2, "#dc3d35");
+
+    drawLeg(p, "back", limbWidth - 0.45, back, "#18242d");
+    if (!backStrike)
+      drawArm(p, "back", limbWidth - 0.55, back, skin);
+    strokeSegment(p.pelvis, p.chest, limbWidth + (xuan ? 1.8 : 1.2), core);
+    strokeSegment(p.chest, p.neck, limbWidth - 0.2, core);
+    strokeSegment(p.backShoulder, p.frontShoulder, limbWidth + 0.7, core);
+    strokeSegment(p.backHip, p.frontHip, limbWidth + 0.5, core, false);
+    drawJoint(p.pelvis, limbWidth * 0.76, f.cfg.accent);
+    if (xuan) {
+      drawJoint(p.backShoulder, 3.6, "#244c5c");
+      drawJoint(p.frontShoulder, 4, f.cfg.accent);
     } else {
-      rect(-12, -38 + crouch + lean, 6, 21, "#253345");
-      rect(7, -38 + crouch + lean, 7, 25, "#235d70");
-      rect(10, -35 + crouch + lean, 5, 4, a);
+      strokeSegment(
+        p.neck,
+        { x: p.neck.x - 11 - Math.abs(Math.sin(f.frame * 0.13) * 5), y: p.neck.y + 5 },
+        2,
+        f.cfg.col,
+        false,
+      );
     }
-    limb(-5, -50 + crouch + lean, 11, 11, "#c39a7c");
-    rect(
-      -6,
-      -52 + crouch + lean,
-      12,
-      5,
-      f.type === "chi" ? "#17151b" : "#202b32",
-    );
-    rect(flip > 0 ? 2 : -3, -47 + crouch + lean, 2, 1, "#eff6e9");
-    let armY = -35 + crouch + lean,
-      ext =
-        f.move && f.frame >= f.move.a - 3 && f.frame <= f.move.b + 2 ? 19 : 0;
-    limb(6, armY, 7 + ext, 6, f.type === "chi" ? c : "#2b6c79");
-    if (f.type === "xuan") rect(9, armY - 2, 9 + ext, 10, "#375c67");
-    limb(-12, armY + 2, 7, 6, f.type === "chi" ? "#2b2025" : "#1b3343");
-    if (f.state === "guard") {
-      rect(12, -46, 3, 32, a);
-      ctx.globalAlpha = 0.3;
-      rect(15, -47, 5, 34, a);
+    drawHead(p.head, xuan ? 6.8 : 6.1, f);
+    drawLeg(p, "front", limbWidth, front, foot);
+    if (backStrike) {
+      drawArm(p, "front", limbWidth - 0.45, back, skin);
+      drawArm(p, "back", limbWidth + 0.25, front, f.cfg.accent);
+    } else {
+      drawArm(p, "front", limbWidth, front, f.cfg.accent);
     }
-    if (f.move && f.move.ultimate && f.frame > 20) {
-      ctx.globalAlpha = 0.35;
-      for (let i = 1; i < 4; i++) rect(-i * 9, -47, 12, 40, c);
+    if (f.state === "guard" || f.state === "parry" || f.move?.guardMove) {
+      ctx.save();
+      ctx.globalAlpha *= 0.3;
+      strokeSegment(
+        { x: p.frontHand.x + 3, y: p.frontHand.y - 10 },
+        { x: p.frontHand.x + 3, y: p.frontHand.y + 12 },
+        3,
+        f.cfg.accent,
+        false,
+      );
+      ctx.restore();
+    }
+    if (f.move?.ultimate && f.frame > 20) {
+      ctx.save();
+      ctx.globalAlpha *= 0.22;
+      for (let i = 1; i < 4; i++) {
+        ctx.translate(-7, 0);
+        drawArm(p, "front", limbWidth, front, f.cfg.accent);
+      }
+      ctx.restore();
     }
     ctx.restore();
-    if (f.low) {
-    }
+    if (!f.ai && f.move?.key && f.frame <= f.move.b + 8)
+      text(
+        `${f.move.key} · ${f.move.n}`,
+        clamp(f.x, 54, W - 54),
+        Math.max(65, f.y - 68),
+        5,
+        f.cfg.accent,
+        "center",
+      );
   }
   function hudBar(x, y, w, val, max, col, flip = false) {
     rect(x, y, w, 7, "#07101d");
@@ -1785,9 +2294,9 @@
     if (Game.mode === "tutorial" && Game.tutorialCompleteT <= 0) {
       const prompts = [
         "A / D  移动",
-        "J  轻攻击",
-        "K  重攻击",
-        "L  特殊技",
+        "J  手部连拳",
+        "K  腿部重踢",
+        "L  角色专属技",
         "按住 I  防御",
         "U  释放终结技",
       ];
@@ -1935,6 +2444,55 @@
         return f.box().x < 100;
       })(),
     );
+    const model = new Fighter("chi", 120),
+      idlePose = fighterPose(model);
+    ok(
+      "火柴人骨架包含双手双脚",
+      ["frontHand", "backHand", "frontFoot", "backFoot"].every(
+        (joint) =>
+          Number.isFinite(idlePose.points[joint].x) &&
+          Number.isFinite(idlePose.points[joint].y),
+      ),
+    );
+    const activeBox = (name, frame) => {
+        model.move = null;
+        model.state = "idle";
+        model.frame = 0;
+        unfreeze();
+        model.attack(name);
+        model.frame = frame;
+        const pose = fighterPose(model),
+          joint = pose.points[model.move.joint],
+          box = model.box();
+        return {
+          box,
+          centerX: model.x + joint.x * model.face,
+          centerY: model.y + joint.y,
+        };
+      },
+      jStrike = activeBox("light1", 7),
+      kStrike = activeBox("heavy", 18),
+      lStrike = activeBox("special", 14);
+    ok(
+      "攻击判定绑定拳头与脚尖",
+      [jStrike, kStrike, lStrike].every(
+        ({ box, centerX, centerY }) =>
+          box &&
+          Math.abs(box.x + box.w / 2 - centerX) < 0.01 &&
+          Math.abs(box.y + box.h / 2 - centerY) < 0.01,
+      ),
+    );
+    ok(
+      "J K L 动作轮廓互不相同",
+      MOVES.chi.light1.fx !== MOVES.chi.heavy.fx &&
+        MOVES.chi.heavy.fx !== MOVES.chi.special.fx &&
+        MOVES.chi.light1.joint === "frontHand" &&
+        MOVES.chi.heavy.joint === "frontFoot" &&
+        Math.abs(
+          jStrike.box.y + jStrike.box.h / 2 -
+            (kStrike.box.y + kStrike.box.h / 2),
+        ) > 8,
+    );
     const oldError = DIFF.normal.error;
     DIFF.normal.error = -1;
     const ai = new Fighter("xuan", 280, true),
@@ -2021,6 +2579,7 @@
     CHAR,
     DIFF,
     TOWER_REWARDS,
+    fighterPose,
     overlap,
   };
 })();
