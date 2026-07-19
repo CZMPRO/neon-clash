@@ -5,6 +5,7 @@
     screen = document.querySelector("#screen"),
     announce = document.querySelector("#announce"),
     touch = document.querySelector("#touch"),
+    homeButton = document.querySelector("#home-button"),
     shell = document.querySelector("#game-shell");
   ctx.imageSmoothingEnabled = false;
   const W = 384,
@@ -59,6 +60,15 @@
   }
   addEventListener("resize", fitGameShell);
   fitGameShell();
+  function syncShellControls(state) {
+    const inCombat = ["fight", "roundIntro"].includes(state);
+    homeButton.hidden = ["title", "homeConfirm"].includes(state);
+    homeButton.classList.toggle("in-combat", inCombat);
+    homeButton.setAttribute(
+      "aria-label",
+      inCombat ? "暂停并返回游戏首页" : "返回游戏首页",
+    );
+  }
   const Input = {
     held: {},
     pressed: {},
@@ -885,6 +895,8 @@
     playerType: "chi",
     difficulty: "normal",
     overlayReturn: "menu",
+    homeReturnState: "menu",
+    homeReturnOverlay: "menu",
     p: null,
     e: null,
     timer: 60,
@@ -915,8 +927,10 @@
       this.state = s;
       Input.clear();
       Pad.clear();
+      syncShellControls(s);
       touch.classList.toggle("in-game", ["fight", "roundIntro"].includes(s));
       screen.classList.toggle("hidden", ["fight", "roundIntro"].includes(s));
+      if (s === "title") UI.title();
       if (s === "menu") UI.menu();
       if (s === "select") UI.select();
       if (s === "difficulty") UI.difficulty();
@@ -936,6 +950,52 @@
       this.overlayReturn = "menu";
       if (returnTo === "paused") UI.pause();
       else this.setState("menu");
+    },
+    requestHome() {
+      const activeStates = ["fight", "roundIntro", "paused", "reward"],
+        pausedOverlay =
+          ["controls", "settings"].includes(this.state) &&
+          this.overlayReturn === "paused";
+      if (!activeStates.includes(this.state) && !pausedOverlay) {
+        this.goHome();
+        return;
+      }
+      this.homeReturnState = this.state;
+      this.homeReturnOverlay = this.overlayReturn;
+      this.state = "homeConfirm";
+      syncShellControls(this.state);
+      touch.classList.remove("in-game");
+      UI.homeConfirm();
+    },
+    cancelHome() {
+      const returnTo = this.homeReturnState;
+      this.overlayReturn = this.homeReturnOverlay;
+      if (["fight", "roundIntro"].includes(returnTo)) {
+        this.state = returnTo;
+        syncShellControls(returnTo);
+        screen.classList.add("hidden");
+        touch.classList.add("in-game");
+        Input.clear();
+        Pad.clear();
+        return;
+      }
+      if (returnTo === "paused") {
+        UI.pause();
+        return;
+      }
+      this.setState(returnTo);
+    },
+    goHome() {
+      this.p = null;
+      this.e = null;
+      this.mode = "duel";
+      this.freeze = 0;
+      this.cinematic = 0;
+      this.flash = 0;
+      this.message = "";
+      this.messageT = 0;
+      this.overlayReturn = "menu";
+      this.setState("title");
     },
     startMatch(mode = "duel") {
       this.mode = mode;
@@ -1027,6 +1087,7 @@
               : "ROUND " + this.round;
       this.messageT = 105;
       this.state = "roundIntro";
+      syncShellControls(this.state);
       screen.classList.add("hidden");
       touch.classList.add("in-game");
       Audio.start();
@@ -1034,11 +1095,13 @@
     pause() {
       if (this.state === "fight") {
         this.state = "paused";
+        syncShellControls(this.state);
         UI.pause();
       }
     },
     resume() {
       this.state = "fight";
+      syncShellControls(this.state);
       screen.classList.add("hidden");
       touch.classList.add("in-game");
       Input.clear();
@@ -1326,9 +1389,11 @@
     },
   };
   const UI = {
-    show(html) {
-      screen.innerHTML = `<div class="panel">${html}</div>`;
+    show(html, panelClass = "", view = "default") {
+      screen.dataset.view = view;
+      screen.innerHTML = `<div class="panel ${panelClass}">${html}</div>`;
       screen.classList.remove("hidden");
+      syncShellControls(Game.state);
       screen.querySelectorAll("button").forEach((b) =>
         b.addEventListener("click", () => {
           Audio.unlock();
@@ -1339,13 +1404,17 @@
     },
     title() {
       this.show(
-        `<h1 class="logo">零界武斗<br>NEON CLASH</h1><p class="subtitle">A PREMIUM PIXEL FIGHTING EXPERIENCE</p><div class="menu"><button id="enter">进入零界城</button></div><p class="tiny">雨幕天台 · 零界城第七码头</p>`,
+        `<div class="title-topbar"><span class="live-status"><i aria-hidden="true"></i> ZERO CITY // SECTOR 07</span><span class="title-season">武斗祭 · 雨夜场</span></div><div class="title-layout"><div class="title-hero"><p class="eyebrow">原创像素格斗 · 今夜开战</p><h1 class="logo title-logo"><span>零界武斗</span><strong>NEON CLASH</strong></h1><p class="title-lede">在霓虹与暴雨交界的城市，用截然不同的武道风格争夺中央能源塔的资格。</p><button id="enter" class="hero-cta"><span>进入零界城</span><small>ENTER THE ARENA</small><b aria-hidden="true">→</b></button><div class="feature-chips"><span>双武者流派</span><span>五层零界塔</span><span>本地成长记录</span></div></div><aside class="event-card" aria-label="今晚主赛"><div class="event-head"><span>TONIGHT'S MAIN EVENT</span><b>LIVE</b></div><div class="versus-board"><div class="fighter-ticket chi-ticket"><span class="duelist-mark" aria-hidden="true"></span><small>疾速压制</small><strong>赤鸢</strong></div><span class="versus-mark">VS</span><div class="fighter-ticket xuan-ticket"><span class="duelist-mark" aria-hidden="true"></span><small>重甲反击</small><strong>玄嶂</strong></div></div><p class="event-copy">两套完整招式、反击判定与终结技。先在教学中热身，或直接登上雨幕天台。</p><div class="event-meta"><div><span>零界塔最高层</span><strong>${PROGRESS.bestFloor}/${Game.towerMax}</strong></div><div><span>历史最高分</span><strong>${PROGRESS.bestScore}</strong></div></div></aside></div><div class="title-footer"><span>键盘 · 手柄 · 触控</span><span>无需登录 · 进度保存在本机</span></div>`,
+        "title-panel",
+        "title",
       );
       screen.querySelector("#enter").onclick = () => Game.setState("menu");
     },
     menu() {
       this.show(
-        `<h1 class="logo">NEON CLASH</h1><p class="subtitle">零界武斗祭</p><div class="progress-strip"><span>零界塔最高层 ${PROGRESS.bestFloor}/${Game.towerMax}</span><span>最高分 ${PROGRESS.bestScore}</span></div><div class="menu"><button id="start">快速对战</button><button id="tower">零界塔 · 生存挑战</button><button id="tutorial">${PROGRESS.tutorial ? "再次训练" : "实战教学 · 推荐"}</button><button id="select">角色选择</button><button id="diff">难度设置：${{ easy: "简单", normal: "普通", hard: "困难" }[Game.difficulty]}</button><button id="controls">操作说明</button><button id="settings">声音与辅助</button><button id="credits">制作信息</button></div>`,
+        `<div class="hub-head"><div><p class="eyebrow">ZERO CITY FIGHT TERMINAL</p><h1 class="logo hub-logo">NEON CLASH</h1><p class="subtitle">选择今晚的战斗方式</p></div><div class="pilot-card"><span>当前武者</span><strong class="${Game.playerType === "chi" ? "red" : "cyan"}">${Game.playerType === "chi" ? "赤鸢" : "玄嶂"}</strong><small>${Game.playerType === "chi" ? "高速近战 · 连续压迫" : "力量防御 · 架势反击"}</small></div></div><div class="progress-strip hub-progress"><span><i aria-hidden="true"></i> 零界塔最高层 <strong>${PROGRESS.bestFloor}/${Game.towerMax}</strong></span><span>历史最高 <strong>${PROGRESS.bestScore}</strong></span><span>教学 ${PROGRESS.tutorial ? "已完成" : "待完成"}</span></div><div class="mode-grid"><button id="start" class="mode-card duel-card"><span class="mode-no">01</span><span class="mode-copy"><strong>快速对战</strong><small>三局两胜 · 立即迎战 AI</small></span><span class="mode-arrow" aria-hidden="true">→</span></button><button id="tower" class="mode-card tower-card"><span class="mode-no">02</span><span class="mode-copy"><strong>零界塔</strong><small>五层生存 · 三选一强化</small></span><span class="mode-arrow" aria-hidden="true">↑</span></button><button id="tutorial" class="mode-card tutorial-card"><span class="mode-no">03</span><span class="mode-copy"><strong>${PROGRESS.tutorial ? "再次训练" : "实战教学"}</strong><small>${PROGRESS.tutorial ? "重温六步基础训练" : "六步上手 · 新玩家推荐"}</small></span><span class="mode-arrow" aria-hidden="true">◎</span></button></div><div class="hub-subhead"><span>战术终端</span><small>FIGHTER CONFIGURATION</small></div><div class="hub-tools"><button id="select"><span>武者</span><strong>角色选择</strong></button><button id="diff"><span>AI</span><strong>${{ easy: "简单", normal: "普通", hard: "困难" }[Game.difficulty]}难度</strong></button><button id="controls"><span>KEY</span><strong>操作说明</strong></button><button id="settings"><span>SFX</span><strong>声音与辅助</strong></button><button id="credits"><span>INFO</span><strong>制作信息</strong></button><button id="home-menu"><span>⌂</span><strong>返回首页</strong></button></div>`,
+        "hub-panel",
+        "menu",
       );
       screen.querySelector("#start").onclick = () => Game.startMatch("duel");
       screen.querySelector("#tower").onclick = () => Game.startTower();
@@ -1357,6 +1426,7 @@
       screen.querySelector("#settings").onclick = () =>
         Game.openOverlay("settings", "menu");
       screen.querySelector("#credits").onclick = () => Game.setState("credits");
+      screen.querySelector("#home-menu").onclick = () => Game.goHome();
     },
     select() {
       this.show(
@@ -1421,11 +1491,27 @@
       );
       screen.querySelector("#back").onclick = () => Game.setState("menu");
     },
+    homeConfirm() {
+      const runName =
+        Game.mode === "tower"
+          ? `零界塔第 ${Game.towerFloor} 层`
+          : Game.mode === "tutorial"
+            ? "实战教学"
+            : "当前对战";
+      this.show(
+        `<div class="confirm-icon" aria-hidden="true">⌂</div><p class="eyebrow">RETURN TO TITLE</p><h1 class="confirm-title">返回游戏首页？</h1><p class="confirm-copy">${runName}仍在进行。返回后，本局尚未结算的进度不会保留。</p><div class="menu confirm-actions"><button id="cancel-home">继续当前游戏</button><button id="confirm-home" class="danger-action">确认返回首页</button></div>`,
+        "confirm-panel",
+        "confirm",
+      );
+      screen.querySelector("#cancel-home").onclick = () => Game.cancelHome();
+      screen.querySelector("#confirm-home").onclick = () => Game.goHome();
+    },
     pause() {
       Game.state = "paused";
+      syncShellControls(Game.state);
       touch.classList.remove("in-game");
       this.show(
-        `<h1 class="logo">暂停</h1><p class="subtitle">${Game.mode === "tower" ? `零界塔 ${Game.towerFloor}/${Game.towerMax}` : Game.mode === "tutorial" ? "实战教学" : "快速对战"}</p><div class="menu"><button id="resume">继续游戏</button><button id="restart">重新开始</button><button id="controls">操作说明</button><button id="settings">声音与辅助</button><button id="menu">返回主菜单</button></div>`,
+        `<h1 class="logo">暂停</h1><p class="subtitle">${Game.mode === "tower" ? `零界塔 ${Game.towerFloor}/${Game.towerMax}` : Game.mode === "tutorial" ? "实战教学" : "快速对战"}</p><div class="menu"><button id="resume">继续游戏</button><button id="restart">重新开始</button><button id="controls">操作说明</button><button id="settings">声音与辅助</button><button id="menu">返回主菜单</button><button id="home">返回游戏首页</button></div>`,
       );
       screen.querySelector("#resume").onclick = () => Game.resume();
       screen.querySelector("#restart").onclick = () => Game.restart();
@@ -1434,6 +1520,7 @@
       screen.querySelector("#settings").onclick = () =>
         Game.openOverlay("settings", "paused");
       screen.querySelector("#menu").onclick = () => Game.setState("menu");
+      screen.querySelector("#home").onclick = () => Game.requestHome();
     },
     results() {
       if (Game.mode === "tower") {
@@ -1885,6 +1972,19 @@
     Game.updateTutorial({ guard: 1 }, 0.4);
     Game.updateTutorial({ ultimate: 1 }, 1 / 60);
     ok("六步实战教学可完成", Game.tutorialCompleteT > 0);
+    Game.setState("menu");
+    screen.querySelector("#home-menu").click();
+    ok("主菜单可返回游戏首页", Game.state === "title" && homeButton.hidden);
+    Game.startMatch("duel");
+    Game.state = "fight";
+    syncShellControls(Game.state);
+    homeButton.click();
+    const homePrompt = Game.state === "homeConfirm";
+    screen.querySelector("#confirm-home")?.click();
+    ok(
+      "战斗中可安全返回首页",
+      homePrompt && Game.state === "title" && !Game.p,
+    );
     const pass = out.every((x) => x.pass);
     screen.classList.remove("hidden");
     screen.innerHTML = `<div class="panel"><h1 class="logo">SELF TEST ${pass ? "PASS" : "FAIL"}</h1><pre>${out.map((x) => `${x.pass ? "PASS" : "FAIL"}  ${x.name}`).join("\n")}</pre></div>`;
@@ -1894,6 +1994,12 @@
   addEventListener("keydown", (e) => {
     if (e.code === "KeyR" && Game.state === "results") Game.restart();
   });
+  homeButton.addEventListener("click", () => {
+    Audio.unlock();
+    Audio.ui();
+    Game.requestHome();
+  });
+  syncShellControls(Game.state);
   UI.title();
   const query = new URLSearchParams(location.search);
   if (query.has("selftest")) {
