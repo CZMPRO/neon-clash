@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+  <meta name="theme-color" content="#07101d">
+  <title>零界武斗：NEON CLASH</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="runtime.css">
+</head>
+<body>
+  <main id="app" aria-label="零界武斗：NEON CLASH">
+    <section id="game-shell">
+      <canvas id="game" width="384" height="216" aria-label="格斗游戏画面"></canvas>
+      <div id="scanlines" aria-hidden="true"></div>
+      <div id="screen" class="screen"></div>
+      <div id="touch" aria-label="触控操作">
+        <div class="touch-left">
+          <button data-key="left" aria-label="向左">◀</button><button data-key="right" aria-label="向右">▶</button>
+          <button data-key="down" aria-label="低姿态">▼</button><button data-key="jump" aria-label="跳跃">▲</button>
+        </div>
+        <div class="touch-right">
+          <button data-key="light" aria-label="轻攻击">J</button><button data-key="heavy" aria-label="重攻击">K</button>
+          <button data-key="special" aria-label="特殊攻击">L</button><button data-key="guard" aria-label="防御">I</button>
+          <button data-key="ultimate" class="ultimate" aria-label="终结技">U</button>
+        </div>
+      </div>
+      <div id="announce" class="sr-only" aria-live="assertive"></div>
+    </section>
+  </main>
+  <script src="game.js"></script>
+</body>
+</html>
