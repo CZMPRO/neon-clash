@@ -10,6 +10,7 @@
   ctx.imageSmoothingEnabled = false;
   const W = 384,
     H = 216,
+    RENDER_SCALE = 5 / 3,
     FLOOR = 174,
     clamp = (v, a, b) => Math.max(a, Math.min(b, v)),
     lerp = (a, b, t) => a + (b - a) * t,
@@ -741,6 +742,38 @@
       accent: "#9a78e9",
     },
   };
+  const VOXEL_MODELS = {
+    chi: { limb: 5.6, torso: 13, shoulder: 9, hip: 8.5, head: 7.4, depth: 4.5 },
+    xuan: { limb: 6.8, torso: 16, shoulder: 11, hip: 10, head: 8.2, depth: 5.5 },
+  };
+  class CommandBuffer {
+    constructor(windowFrames = 12) {
+      this.windowFrames = windowFrames;
+      this.items = new Map();
+    }
+    capture(control = {}) {
+      const frame = Game?.frameCount || 0;
+      for (const type of ["ultimate", "jump", "down", "special", "heavy", "light", "dashAttack"])
+        if (control[type]) this.items.set(type, {
+          type,
+          pressedFrame: frame,
+          expiresFrame: frame + this.windowFrames,
+          held: true,
+          consumed: false,
+        });
+    }
+    get(type) { return this.items.get(type); }
+    consume(type) {
+      const found = this.items.has(type);
+      this.items.delete(type);
+      return found;
+    }
+    tick(frame) {
+      for (const [type, item] of this.items)
+        if (item.consumed || frame > item.expiresFrame) this.items.delete(type);
+    }
+    clear() { this.items.clear(); }
+  }
   class Fighter {
     constructor(type, x, ai = false) {
       this.type = type;
@@ -775,6 +808,7 @@
       this.chain = false;
       this.buffer = null;
       this.bufferT = 0;
+      this.commands = new CommandBuffer(12);
       this.hitConfirm = false;
       this.low = false;
       this.stats = { damage: 0 };
@@ -827,6 +861,7 @@
       this.state = name;
       this.frame = 0;
       this.hitSet.clear();
+      this.commands.clear();
       this.chain = false;
       this.hitConfirm = false;
       Audio.skill(this.type, name, "start");
@@ -836,8 +871,16 @@
       }
       return true;
     }
-    update(dt, opp, control) {
+    captureControls(control) {
+      this.commands.capture(control);
+    }
+    update(dt, opp, control, captured = false) {
       this.frame++;
+      if (!captured) this.captureControls(control);
+      this.commands.tick(Game.frameCount);
+      control = Object.assign({}, control);
+      for (const type of ["ultimate", "jump", "down", "special", "heavy", "light", "dashAttack"])
+        if (this.commands.get(type)) control[type] = true;
       const request = control.ultimate
         ? "ultimate"
         : control.special
@@ -851,7 +894,8 @@
               : null;
       if (request && this.move) {
         this.buffer = request;
-        this.bufferT = 8;
+        this.bufferT = 12;
+        this.commands.consume(request === "light1" || request === "air" ? "light" : request);
       }
       if (this.bufferT > 0 && --this.bufferT === 0) this.buffer = null;
       if (this.invuln > 0) this.invuln--;
@@ -933,6 +977,10 @@
       const left = control.left,
         right = control.right,
         dir = (right ? 1 : 0) - (left ? 1 : 0);
+      if (control.ultimate && this.attack("ultimate")) {
+        this.commands.consume("ultimate");
+        return;
+      }
       if (control.guard) {
         if (this.state !== "guard") {
           this.state = "guard";
@@ -947,11 +995,13 @@
         this.state = "jump";
         this.frame = 0;
         Audio.tone(190, 0.06, "square", 0.05, 80);
+        this.commands.consume("jump");
       }
       if (control.down && this.grounded) {
         this.state = "crouch";
         this.vx = 0;
         this.invuln = Math.max(this.invuln, 2);
+        this.commands.consume("down");
       } else if (dir && this.grounded) {
         this.vx = dir * this.cfg.speed * (control.dash ? 1.8 : 1);
         this.x += this.vx * dt;
@@ -962,11 +1012,10 @@
         if (!["land", "crouch"].includes(this.state) || this.frame > 10)
           this.state = "idle";
       }
-      if (control.light) this.attack(this.grounded ? "light1" : "air");
-      else if (control.heavy) this.attack(this.grounded ? "heavy" : "air");
-      else if (control.special) this.attack("special");
-      else if (control.ultimate) this.attack("ultimate");
-      else if (control.dashAttack) this.attack("dash");
+      if (control.special && this.attack("special")) this.commands.consume("special");
+      else if (control.heavy && this.attack(this.grounded ? "heavy" : "air")) this.commands.consume("heavy");
+      else if (control.light && this.attack(this.grounded ? "light1" : "air")) this.commands.consume("light");
+      else if (control.dashAttack && this.attack("dash")) this.commands.consume("dashAttack");
     }
     box() {
       const m = this.move;
@@ -1090,6 +1139,7 @@
         special: Input.eat("special") || Pad.eat("special"),
         ultimate: Input.eat("ultimate") || Pad.eat("ultimate"),
       };
+    if (Input.eat("down") || Pad.eat("down")) c.down = true;
     for (const d of ["left", "right"])
       if (Input.eat(d)) {
         c[d] = 1;
@@ -1109,6 +1159,7 @@
     homeReturnOverlay: "menu",
     p: null,
     e: null,
+    frameCount: 0,
     timer: 60,
     round: 1,
     freeze: 0,
@@ -1138,6 +1189,8 @@
       this.state = s;
       Input.clear();
       Pad.clear();
+      this.p?.commands?.clear();
+      this.e?.commands?.clear();
       syncShellControls(s);
       touch.classList.toggle("in-game", ["fight", "roundIntro"].includes(s));
       screen.classList.toggle("hidden", ["fight", "roundIntro"].includes(s));
@@ -1306,6 +1359,8 @@
     pause() {
       if (this.state === "fight") {
         this.state = "paused";
+        this.p?.commands?.clear();
+        this.e?.commands?.clear();
         syncShellControls(this.state);
         UI.pause();
       }
@@ -1343,10 +1398,18 @@
         return;
       }
       if (this.state !== "fight") return;
+      const pc = playerControl();
+      this.p.captureControls(pc);
+      if (pc.ultimate && this.p.energy < 100) {
+        this.message = "能量不足";
+        this.messageT = 28;
+        Audio.tone(82, 0.05, "square", 0.025, -18);
+      }
       if (this.freeze > 0) {
         this.freeze--;
         return;
       }
+      this.frameCount++;
       if (this.cinematic > 0) this.cinematic--;
       Audio.music(
         dt,
@@ -1355,10 +1418,9 @@
       );
       this.totalTime += dt;
       if (this.mode !== "tutorial") this.timer = Math.max(0, this.timer - dt);
-      const pc = playerControl(),
-        ec = this.mode === "tutorial" ? {} : aiControl(this.e, this.p, dt);
+      const ec = this.mode === "tutorial" ? {} : aiControl(this.e, this.p, dt);
       if (this.mode === "tutorial") this.updateTutorial(pc, dt);
-      this.p.update(dt, this.e, pc);
+      this.p.update(dt, this.e, pc, true);
       this.e.update(dt, this.p, ec);
       this.resolve(this.p, this.e);
       this.resolve(this.e, this.p);
@@ -2129,8 +2191,8 @@
     };
   }
   function strokeSegment(from, to, width, color, shine = true) {
-    ctx.lineCap = "round";
-    ctx.lineJoin = "round";
+    ctx.lineCap = "butt";
+    ctx.lineJoin = "miter";
     ctx.beginPath();
     ctx.moveTo(from.x, from.y);
     ctx.lineTo(to.x, to.y);
@@ -2155,28 +2217,65 @@
       ctx.restore();
     }
   }
-  function drawJoint(point, radius, color) {
+  function voxelPolygon(points, color) {
     ctx.beginPath();
-    ctx.arc(point.x, point.y, radius + 1.1, 0, Math.PI * 2);
-    ctx.fillStyle = "#03070c";
-    ctx.fill();
-    ctx.beginPath();
-    ctx.arc(point.x, point.y, radius, 0, Math.PI * 2);
+    ctx.moveTo(points[0].x, points[0].y);
+    for (let i = 1; i < points.length; i++) ctx.lineTo(points[i].x, points[i].y);
+    ctx.closePath();
     ctx.fillStyle = color;
     ctx.fill();
-    ctx.globalAlpha *= 0.35;
-    ctx.beginPath();
-    ctx.arc(point.x - 0.8, point.y - 0.8, Math.max(0.7, radius * 0.35), 0, Math.PI * 2);
-    ctx.fillStyle = "#ffffff";
-    ctx.fill();
-    ctx.globalAlpha /= 0.35;
+  }
+  function voxelSegment(from, to, width, color, depth = 2, highlight = "#ffffff") {
+    const dx = to.x - from.x,
+      dy = to.y - from.y,
+      len = Math.max(0.01, Math.hypot(dx, dy)),
+      nx = (-dy / len) * width * 0.5,
+      ny = (dx / len) * width * 0.5,
+      z = { x: -depth, y: -depth },
+      a = { x: from.x + nx, y: from.y + ny },
+      b = { x: to.x + nx, y: to.y + ny },
+      c = { x: to.x - nx, y: to.y - ny },
+      d = { x: from.x - nx, y: from.y - ny };
+    voxelPolygon([
+      { x: a.x + z.x, y: a.y + z.y },
+      { x: b.x + z.x, y: b.y + z.y },
+      b,
+      a,
+    ], "#26323a");
+    voxelPolygon([
+      { x: b.x + z.x, y: b.y + z.y },
+      { x: c.x + z.x, y: c.y + z.y },
+      c,
+      b,
+    ], "#02060b");
+    voxelPolygon([a, b, c, d], "#02060b");
+    const inset = 0.8;
+    voxelPolygon([
+      { x: a.x + (dx / len) * inset, y: a.y + (dy / len) * inset },
+      { x: b.x - (dx / len) * inset, y: b.y - (dy / len) * inset },
+      { x: c.x - (dx / len) * inset, y: c.y - (dy / len) * inset },
+      { x: d.x + (dx / len) * inset, y: d.y + (dy / len) * inset },
+    ], color);
+    ctx.save();
+    ctx.globalAlpha *= 0.22;
+    voxelPolygon([
+      { x: a.x + z.x, y: a.y + z.y },
+      { x: b.x + z.x, y: b.y + z.y }, b, a,
+    ], highlight);
+    ctx.restore();
+  }
+  function drawJoint(point, radius, color) {
+    const size = radius * 1.7;
+    rect(point.x - size / 2 - 1, point.y - size / 2 - 1, size + 2, size + 2, "#02060b");
+    rect(point.x - size / 2, point.y - size / 2, size, size, color);
+    rect(point.x - size / 2, point.y - size / 2, size, 1, "#ffffff55");
   }
   function drawArm(points, side, width, color, handColor) {
     const shoulder = points[`${side}Shoulder`],
       elbow = points[`${side}Elbow`],
       hand = points[`${side}Hand`];
-    strokeSegment(shoulder, elbow, width, color);
-    strokeSegment(elbow, hand, width - 0.35, color);
+    voxelSegment(shoulder, elbow, width, color, width * 0.42);
+    voxelSegment(elbow, hand, width - 0.15, color, width * 0.38);
     drawJoint(elbow, width * 0.58, color);
     drawJoint(hand, width * 0.78, handColor);
   }
@@ -2185,35 +2284,35 @@
       knee = points[`${side}Knee`],
       ankle = points[`${side}Ankle`],
       foot = points[`${side}Foot`];
-    strokeSegment(hip, knee, width, color);
-    strokeSegment(knee, ankle, width - 0.2, color);
-    strokeSegment(ankle, foot, width + 0.8, footColor);
+    voxelSegment(hip, knee, width, color, width * 0.45);
+    voxelSegment(knee, ankle, width - 0.05, color, width * 0.42);
+    voxelSegment(ankle, foot, width + 1.2, footColor, width * 0.5);
     drawJoint(knee, width * 0.58, color);
     drawJoint(foot, width * 0.62, footColor);
   }
   function drawHead(point, radius, f) {
-    ctx.beginPath();
-    ctx.arc(point.x, point.y, radius + 1.4, 0, Math.PI * 2);
-    ctx.fillStyle = "#02060b";
-    ctx.fill();
-    ctx.beginPath();
-    ctx.arc(point.x, point.y, radius, 0, Math.PI * 2);
-    ctx.fillStyle = f.type === "chi" ? "#d79b79" : "#b88f78";
-    ctx.fill();
-    ctx.save();
-    ctx.globalAlpha = 0.28;
-    ctx.beginPath();
-    ctx.arc(point.x - 1.5, point.y + 1, radius * 0.86, -Math.PI / 2, Math.PI / 2);
-    ctx.fillStyle = "#371b21";
-    ctx.fill();
-    ctx.restore();
-    rect(point.x + radius * 0.35, point.y - 1, 2, 1, "#f5f5df");
+    const skin = f.type === "chi" ? "#d79b79" : "#b88f78",
+      size = radius * 1.72,
+      x = point.x - size / 2,
+      y = point.y - size / 2,
+      depth = radius * 0.42;
+    rect(x - 1, y - 1, size + 2, size + 2, "#02060b");
+    rect(x, y, size, size, skin);
+    voxelPolygon([
+      { x, y }, { x: x + depth, y: y - depth },
+      { x: x + size + depth, y: y - depth }, { x: x + size, y },
+    ], f.type === "chi" ? "#4b2024" : "#36515e");
+    voxelPolygon([
+      { x: x + size, y }, { x: x + size + depth, y: y - depth },
+      { x: x + size + depth, y: y + size - depth }, { x: x + size, y: y + size },
+    ], "#765746");
+    rect(point.x + radius * 0.25, point.y - 1, 2, 2, f.cfg.accent);
     if (f.type === "chi") {
-      rect(point.x - radius - 1, point.y - radius + 1, radius * 2 + 2, 3, "#2a1118");
-      rect(point.x - radius - 6, point.y - radius + 2, 6, 2, f.cfg.col);
+      rect(x, y, size, 3, "#2a1118");
+      rect(x - 5, y + 2, 5, 2, f.cfg.col);
     } else {
-      rect(point.x - radius - 1, point.y - radius, radius * 2 + 2, 4, "#253845");
-      rect(point.x + radius - 2, point.y - radius + 1, 3, 4, f.cfg.accent);
+      rect(x, y, size, 4, "#253845");
+      rect(x + size - 3, y + 1, 3, 4, f.cfg.accent);
     }
   }
   function fighter(f) {
@@ -2228,7 +2327,8 @@
       core = xuan ? "#286675" : "#8e3034",
       skin = xuan ? "#b88f78" : "#d79b79",
       foot = xuan ? "#57d2dc" : "#dc493d",
-      limbWidth = xuan ? 4.4 : 3.6,
+      voxel = VOXEL_MODELS[f.type],
+      limbWidth = voxel.limb,
       backStrike = f.move?.joint === "backHand";
 
     ctx.save();
@@ -2252,14 +2352,16 @@
     drawLeg(p, "back", limbWidth - 0.45, back, "#18242d");
     if (!backStrike)
       drawArm(p, "back", limbWidth - 0.55, back, skin);
-    strokeSegment(p.pelvis, p.chest, limbWidth + (xuan ? 1.8 : 1.2), core);
-    strokeSegment(p.chest, p.neck, limbWidth - 0.2, core);
-    strokeSegment(p.backShoulder, p.frontShoulder, limbWidth + 0.7, core);
-    strokeSegment(p.backHip, p.frontHip, limbWidth + 0.5, core, false);
+    voxelSegment(p.pelvis, p.chest, voxel.torso, core, voxel.depth);
+    voxelSegment(p.chest, p.neck, limbWidth + 1.2, core, 2.4);
+    voxelSegment(p.backShoulder, p.frontShoulder, voxel.shoulder, core, 3.8);
+    voxelSegment(p.backHip, p.frontHip, voxel.hip, back, 3.2);
     drawJoint(p.pelvis, limbWidth * 0.76, f.cfg.accent);
     if (xuan) {
       drawJoint(p.backShoulder, 3.6, "#244c5c");
       drawJoint(p.frontShoulder, 4, f.cfg.accent);
+      rect(p.chest.x - 2, p.chest.y - 5, 2, 12, "#65e4e7");
+      rect(p.chest.x + 2, p.chest.y - 3, 1, 9, "#9478df");
     } else {
       strokeSegment(
         p.neck,
@@ -2268,8 +2370,10 @@
         f.cfg.col,
         false,
       );
+      rect(p.chest.x - 4, p.chest.y - 5, 8, 2, "#d7a943");
+      rect(p.pelvis.x - 5, p.pelvis.y - 1, 10, 2, "#35131a");
     }
-    drawHead(p.head, xuan ? 6.8 : 6.1, f);
+    drawHead(p.head, voxel.head, f);
     drawLeg(p, "front", limbWidth, front, foot);
     if (backStrike) {
       drawArm(p, "front", limbWidth - 0.45, back, skin);
@@ -2391,6 +2495,10 @@
     }
   }
   function render(t) {
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, C.width, C.height);
+    ctx.setTransform(RENDER_SCALE, 0, 0, RENDER_SCALE, 0, 0);
+    ctx.imageSmoothingEnabled = false;
     let power =
         Game.shake > 0 ? (Game.shake > 8 ? 4 : Game.shake > 4 ? 2 : 0) : 0,
       sx = power ? rnd(-power, power) * SETTINGS.shake : 0,
@@ -2531,7 +2639,23 @@
     buffered.update(1 / 60, b, { light: true });
     buffered.frame = buffered.move.len;
     buffered.update(1 / 60, b, {});
-    ok("八帧输入缓冲", buffered.move?.moveKey === "light2");
+    ok("十二帧连段输入缓冲", buffered.move?.moveKey === "light2");
+    const responsive = new Fighter("chi", 130);
+    responsive.state = "hit";
+    responsive.hitstun = 2;
+    responsive.captureControls({ jump: true });
+    responsive.update(1 / 60, b, {}, true);
+    responsive.update(1 / 60, b, {}, true);
+    responsive.update(1 / 60, b, {}, true);
+    ok("受击恢复后执行缓冲跳跃", responsive.state === "jump" && responsive.y < FLOOR);
+    const crouchBuffered = new Fighter("chi", 130);
+    crouchBuffered.state = "land";
+    crouchBuffered.captureControls({ down: true });
+    crouchBuffered.update(1 / 60, b, {}, true);
+    ok("落地状态执行缓冲下蹲", crouchBuffered.state === "crouch");
+    const freezeBuffered = new CommandBuffer(12);
+    freezeBuffered.capture({ heavy: true });
+    ok("命中停顿期间保留攻击命令", !!freezeBuffered.get("heavy"));
     Game.p = new Fighter("chi", 100);
     Game.e = new Fighter("xuan", 105);
     Game.separate();
@@ -2551,7 +2675,7 @@
     const model = new Fighter("chi", 120),
       idlePose = fighterPose(model);
     ok(
-      "火柴人骨架包含双手双脚",
+      "体素骨架包含双手双脚",
       ["frontHand", "backHand", "frontFoot", "backFoot"].every(
         (joint) =>
           Number.isFinite(idlePose.points[joint].x) &&
@@ -2679,10 +2803,12 @@
   window.NeonClash = {
     Game,
     Fighter,
+    CommandBuffer,
     MOVES,
     CHAR,
     DIFF,
     TOWER_REWARDS,
+    VOXEL_MODELS,
     fighterPose,
     overlap,
   };
