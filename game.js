@@ -212,34 +212,72 @@
     ac: null,
     master: null,
     musicTimer: 0,
+    voices: 0,
+    cool: {},
     unlock() {
       if (!this.ac) {
         this.ac = new (window.AudioContext || window.webkitAudioContext)();
-        this.master = this.ac.createGain();
+        this.master = this.ac.createDynamicsCompressor();
+        this.master.threshold.value = -14;
+        this.master.knee.value = 16;
+        this.master.ratio.value = 6;
         this.master.connect(this.ac.destination);
       }
       if (this.ac.state === "suspended") this.ac.resume();
     },
-    raw(freq, dur, type, vol, slide = 0) {
-      if (!this.ac) return;
+    raw(freq, dur, type, vol, slide = 0, key = "") {
+      if (!this.ac || this.voices >= 18) return;
       const o = this.ac.createOscillator(),
         g = this.ac.createGain(),
-        t = this.ac.currentTime;
+        t = this.ac.currentTime,
+        variance = 1 + rnd(-0.03, 0.03);
+      if (key && this.cool[key] && t - this.cool[key] < 0.025) return;
+      if (key) this.cool[key] = t;
+      this.voices++;
       o.type = type;
-      o.frequency.setValueAtTime(freq, t);
+      o.frequency.setValueAtTime(freq * variance, t);
       o.frequency.exponentialRampToValueAtTime(
-        Math.max(30, freq + slide),
+        Math.max(30, (freq + slide) * variance),
         t + dur,
       );
       g.gain.setValueAtTime(vol, t);
       g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
       o.connect(g);
       g.connect(this.master);
+      o.onended = () => (this.voices = Math.max(0, this.voices - 1));
       o.start(t);
       o.stop(t + dur);
     },
-    tone(freq, dur = 0.08, type = "square", vol = 0.12, slide = 0) {
-      if (SETTINGS.sfx) this.raw(freq, dur, type, vol * SETTINGS.sfx, slide);
+    tone(freq, dur = 0.08, type = "square", vol = 0.12, slide = 0, key = "") {
+      if (SETTINGS.sfx)
+        this.raw(freq, dur, type, vol * SETTINGS.sfx, slide, key);
+    },
+    skill(type, move, phase) {
+      const key = `${type}.${move}.${phase}`,
+        chi = type === "chi",
+        step = move === "light1" ? 0 : move === "light2" ? 1 : 2;
+      if (phase === "start") {
+        if (move === "heavy")
+          this.tone(chi ? 210 : 82, 0.16, "triangle", 0.07, chi ? 90 : -12, key);
+        else if (move === "special") {
+          this.tone(chi ? 360 : 105, 0.2, chi ? "sawtooth" : "triangle", 0.09, chi ? 420 : -18, key);
+          this.tone(chi ? 690 : 160, 0.12, "sine", 0.045, chi ? 180 : -30, `${key}.layer`);
+        } else if (move === "ultimate") {
+          this.tone(chi ? 440 : 74, 0.42, "sawtooth", 0.12, chi ? 700 : 38, key);
+          this.tone(chi ? 880 : 148, 0.35, "sine", 0.07, chi ? 220 : -48, `${key}.layer`);
+        }
+      } else if (phase === "swing") {
+        const base = chi ? [390, 315, 255][step] : [165, 118, 88][step];
+        this.tone(base, 0.07, chi ? "square" : "sawtooth", 0.075, chi ? 170 : -35, key);
+        if (move === "heavy") this.tone(chi ? 170 : 64, 0.14, "sawtooth", 0.1, -25, `${key}.weight`);
+        if (move === "special") this.tone(chi ? 520 : 92, 0.2, chi ? "sawtooth" : "triangle", 0.11, chi ? 360 : -20, `${key}.skill`);
+      } else {
+        const base = chi ? [235, 190, 145][step] : [115, 82, 58][step];
+        this.tone(base, move === "heavy" ? 0.17 : 0.09, move === "heavy" ? "sawtooth" : "square", move === "heavy" ? 0.17 : 0.105, -Math.max(25, base * 0.35), key);
+        this.tone(chi ? 720 : 180, 0.06, "triangle", 0.065, chi ? -260 : -80, `${key}.contact`);
+        if (move === "special" || move === "ultimate")
+          this.tone(chi ? 310 : 52, 0.24, "sawtooth", 0.12, chi ? 260 : -18, `${key}.power`);
+      }
     },
     music(dt, final = false) {
       if (!this.ac || !SETTINGS.music) return;
@@ -458,12 +496,13 @@
         hitW: 15,
         hitH: 12,
         fx: "jab",
-        len: 19,
-        a: 5,
-        b: 8,
-        d: 35,
-        p: 19,
-        k: 28,
+        len: 16,
+        a: 4,
+        b: 7,
+        d: 42,
+        p: 20,
+        k: 30,
+        dash: 38,
         next: "light2",
       },
       light2: {
@@ -473,12 +512,13 @@
         hitW: 16,
         hitH: 13,
         fx: "cross",
-        len: 20,
-        a: 5,
-        b: 9,
-        d: 38,
-        p: 20,
-        k: 30,
+        len: 17,
+        a: 4,
+        b: 8,
+        d: 45,
+        p: 22,
+        k: 34,
+        dash: 28,
         next: "light3",
       },
       light3: {
@@ -488,12 +528,13 @@
         hitW: 18,
         hitH: 16,
         fx: "uppercut",
-        len: 25,
-        a: 7,
-        b: 11,
-        d: 55,
-        p: 28,
-        k: 55,
+        len: 22,
+        a: 6,
+        b: 10,
+        d: 64,
+        p: 32,
+        k: 60,
+        dash: 16,
       },
       heavy: {
         n: "赤羽回旋踢",
@@ -505,9 +546,9 @@
         len: 38,
         a: 15,
         b: 20,
-        d: 105,
-        p: 52,
-        k: 78,
+        d: 122,
+        p: 58,
+        k: 82,
         heavy: 1,
         down: 1,
       },
@@ -521,10 +562,10 @@
         len: 34,
         a: 9,
         b: 18,
-        d: 90,
-        p: 42,
-        k: 70,
-        dash: 150,
+        d: 108,
+        p: 48,
+        k: 74,
+        dash: 165,
         heavy: 1,
       },
       dash: {
@@ -536,9 +577,9 @@
         len: 27,
         a: 8,
         b: 13,
-        d: 62,
-        p: 30,
-        k: 58,
+        d: 72,
+        p: 34,
+        k: 62,
         dash: 110,
       },
       air: {
@@ -550,9 +591,9 @@
         len: 27,
         a: 6,
         b: 15,
-        d: 58,
-        p: 28,
-        k: 48,
+        d: 68,
+        p: 32,
+        k: 52,
       },
       ultimate: {
         n: "百羽燎原",
@@ -563,8 +604,8 @@
         len: 142,
         a: 34,
         b: 98,
-        d: 48,
-        p: 30,
+        d: 52,
+        p: 32,
         k: 24,
         multi: 5,
         ultimate: 1,
@@ -581,9 +622,9 @@
         len: 24,
         a: 7,
         b: 11,
-        d: 48,
-        p: 24,
-        k: 35,
+        d: 55,
+        p: 27,
+        k: 38,
         next: "light2",
       },
       light2: {
@@ -596,9 +637,9 @@
         len: 29,
         a: 9,
         b: 14,
-        d: 62,
-        p: 31,
-        k: 52,
+        d: 72,
+        p: 36,
+        k: 58,
       },
       heavy: {
         n: "镇岳崩踢",
@@ -610,9 +651,9 @@
         len: 46,
         a: 19,
         b: 25,
-        d: 135,
-        p: 68,
-        k: 95,
+        d: 150,
+        p: 75,
+        k: 100,
         heavy: 1,
         down: 1,
       },
@@ -626,9 +667,9 @@
         len: 44,
         a: 4,
         b: 32,
-        d: 110,
-        p: 58,
-        k: 88,
+        d: 125,
+        p: 64,
+        k: 92,
         guardMove: 1,
         heavy: 1,
       },
@@ -641,9 +682,9 @@
         len: 34,
         a: 12,
         b: 18,
-        d: 82,
-        p: 43,
-        k: 72,
+        d: 92,
+        p: 48,
+        k: 78,
         dash: 85,
         heavy: 1,
       },
@@ -656,9 +697,9 @@
         len: 34,
         a: 8,
         b: 19,
-        d: 74,
-        p: 35,
-        k: 60,
+        d: 84,
+        p: 40,
+        k: 64,
         down: 1,
       },
       ultimate: {
@@ -670,9 +711,9 @@
         len: 154,
         a: 38,
         b: 110,
-        d: 52,
-        p: 35,
-        k: 28,
+        d: 56,
+        p: 38,
+        k: 30,
         multi: 5,
         ultimate: 1,
       },
@@ -704,12 +745,11 @@
       this.cfg = Object.assign({}, CHAR[type]);
       this.ai = ai;
       if (!ai) {
-        this.cfg.hp = Math.round(this.cfg.hp * 1.18);
-        this.cfg.posture = Math.round(this.cfg.posture * 1.12);
-        this.cfg.speed = Math.round(this.cfg.speed * 1.08);
+        this.cfg.hp = Math.round(this.cfg.hp * 1.08);
+        this.cfg.posture = Math.round(this.cfg.posture * 1.05);
       }
-      this.damageMul = ai ? 1 : 1.14;
-      this.energyMul = ai ? 1 : 1.18;
+      this.damageMul = ai ? 1 : 1.1;
+      this.energyMul = ai ? 1 : 1.08;
       this.x = x;
       this.y = FLOOR;
       this.vx = 0;
@@ -731,6 +771,9 @@
       this.move = null;
       this.hitSet = new Set();
       this.chain = false;
+      this.buffer = null;
+      this.bufferT = 0;
+      this.hitConfirm = false;
       this.low = false;
       this.stats = { damage: 0 };
       this.aiData = { timer: 0, mode: "wait", memory: [] };
@@ -754,6 +797,9 @@
         comboTimer: 0,
         move: null,
         chain: false,
+        buffer: null,
+        bufferT: 0,
+        hitConfirm: false,
         lastMulti: -99,
       });
       this.hitSet.clear();
@@ -773,44 +819,39 @@
       if (name === "ultimate" && this.energy < 100) return false;
       if (name === "air" && this.grounded) return false;
       this.move = Object.assign(
-        { id: performance.now() + Math.random() },
+        { id: performance.now() + Math.random(), moveKey: name },
         MOVES[this.type][name],
       );
       this.state = name;
       this.frame = 0;
       this.hitSet.clear();
       this.chain = false;
-      castFx(this, name);
+      this.hitConfirm = false;
+      Audio.skill(this.type, name, "start");
       if (name === "ultimate") {
         this.energy = 0;
         Game.cinematic = 30;
-        Audio.tone(
-          this.type === "chi" ? 540 : 130,
-          0.4,
-          "sawtooth",
-          0.16,
-          this.type === "chi" ? 620 : -40,
-        );
-      } else if (name === "special")
-        Audio.tone(
-          this.type === "chi" ? 420 : 95,
-          0.18,
-          this.type === "chi" ? "sawtooth" : "triangle",
-          0.11,
-          this.type === "chi" ? 380 : -25,
-        );
-      else
-        Audio.tone(
-          name === "heavy" ? 120 : 260,
-          0.07,
-          name === "heavy" ? "sawtooth" : "square",
-          0.06,
-          name === "heavy" ? -30 : 90,
-        );
+      }
       return true;
     }
     update(dt, opp, control) {
       this.frame++;
+      const request = control.ultimate
+        ? "ultimate"
+        : control.special
+          ? "special"
+          : control.heavy
+            ? "heavy"
+            : control.light
+              ? this.grounded
+                ? "light1"
+                : "air"
+              : null;
+      if (request && this.move) {
+        this.buffer = request;
+        this.bufferT = 8;
+      }
+      if (this.bufferT > 0 && --this.bufferT === 0) this.buffer = null;
       if (this.invuln > 0) this.invuln--;
       if (this.hitstun > 0) {
         this.hitstun--;
@@ -866,17 +907,24 @@
       }
       if (this.move) {
         const m = this.move;
-        if (control.light && m.next && this.frame > m.b - 2) this.chain = true;
+        if (this.frame === m.a) {
+          castFx(this, m.moveKey);
+          Audio.skill(this.type, m.moveKey, "swing");
+        }
+        if (this.buffer === "light1" && m.next && this.frame > m.b - 2)
+          this.chain = true;
         if (m.dash && this.frame < m.a + 4) this.x += m.dash * this.face * dt;
-        if (this.frame > m.len) {
-          if (this.chain && m.next) {
-            this.move = null;
-            this.attack(m.next);
-          } else {
-            this.move = null;
-            this.state = this.grounded ? "idle" : "air";
-            this.frame = 0;
-          }
+        if (
+          this.frame > m.len ||
+          (this.hitConfirm && this.buffer && this.frame > m.b + 2)
+        ) {
+          const next = this.chain && m.next ? m.next : this.buffer;
+          this.move = null;
+          this.state = this.grounded ? "idle" : "air";
+          this.frame = 0;
+          this.buffer = null;
+          this.bufferT = 0;
+          if (next) this.attack(next);
         }
         return;
       }
@@ -1065,6 +1113,7 @@
     cinematic: 0,
     shake: 0,
     flash: 0,
+    crowd: 0,
     message: "",
     messageT: 0,
     totalTime: 0,
@@ -1409,18 +1458,22 @@
         this.message = stance ? "COUNTER" : "PARRY";
         this.messageT = 38;
         this.freeze = 5;
+        this.crowd = 1;
         return;
       }
-      let scale = Math.max(0.35, 1 - a.combo * 0.11),
-        damage = m.d * scale * a.damageMul;
+      const comboScales = [1, 0.92, 0.82, 0.72, 0.62, 0.52, 0.43, 0.35],
+        scale = comboScales[Math.min(a.combo, comboScales.length - 1)],
+        postureDamage =
+          m.p * (m.heavy || m.moveKey === "special" ? 1.1 : 1);
+      let damage = m.d * scale * a.damageMul;
       if (counterHit) {
         damage *= 1.18;
         this.message = "COUNTER HIT";
         this.messageT = 42;
       }
       if (guarded) {
-        damage *= 0.2;
-        b.posture -= m.p;
+        damage *= 0.15;
+        b.posture -= postureDamage;
         b.energy = clamp(b.energy + 4 * b.energyMul, 0, 100);
         Audio.tone(210, 0.08, "square", 0.1, -80);
         particle(b.x, b.y - 32, "#9fb8c2", 5, 0.6);
@@ -1447,16 +1500,21 @@
         b.y -= 1;
         b.invuln = 0;
       }
-      a.energy = clamp(a.energy + (m.heavy ? 14 : 9) * a.energyMul, 0, 100);
+      a.energy = clamp(
+        a.energy + (m.heavy ? 16 : 10.5) * a.energyMul,
+        0,
+        100,
+      );
       b.energy = clamp(b.energy + 6 * b.energyMul, 0, 100);
       a.combo++;
       a.comboTimer = 45;
       a.bestCombo = Math.max(a.bestCombo, a.combo);
       a.stats.damage += damage;
+      a.hitConfirm = true;
       a.hitSet.add(b);
       if (m.multi) a.lastMulti = a.frame;
       castFx(a, a.state, true);
-      Audio.hit(m.heavy ? "heavy" : "light");
+      Audio.skill(a.type, m.moveKey || a.state, "hit");
       particle(
         b.x,
         b.y - 35,
@@ -1467,6 +1525,7 @@
       this.freeze = m.ultimate ? 10 : m.heavy ? 6 : 3;
       this.shake = SETTINGS.reducedFx ? 0 : m.ultimate ? 10 : m.heavy ? 6 : 2;
       this.flash = SETTINGS.reducedFx ? 0 : m.heavy ? 6 : 2;
+      if (m.heavy || m.moveKey === "special" || m.ultimate) this.crowd = 1;
       if (this.sudden) this.endRound(a, "DECISIVE HIT");
     },
     separate() {
@@ -1744,8 +1803,12 @@
     ctx.fillText(t, x, y);
   }
   function background(time) {
-    rect(0, 0, W, H, "#07101d");
-    ctx.fillStyle = "#10172c";
+    const intensity = SETTINGS.reducedFx ? 0 : Math.max(0, Game.round - 1),
+      drift = SETTINGS.reducedFx ? 0 : time,
+      lightning =
+        !SETTINGS.reducedFx && Math.sin(time * 0.31) > 0.994;
+    rect(0, 0, W, H, lightning ? "#26354c" : "#07101d");
+    ctx.fillStyle = lightning ? "#313b55" : "#10172c";
     ctx.beginPath();
     ctx.moveTo(0, 58);
     ctx.lineTo(70, 42);
@@ -1758,7 +1821,7 @@
     ctx.lineTo(0, 120);
     ctx.fill();
     for (let i = 0; i < 18; i++) {
-      let x = ((i * 29 - time * 2 * ((i % 3) + 1)) % 430) - 20,
+      let x = ((i * 29 - drift * 2 * ((i % 3) + 1)) % 430) - 20,
         h = 26 + ((i * 17) % 48);
       rect(x, 114 - h, 22, h, "#101f31");
       for (let y = 0; y < h - 8; y += 8)
@@ -1771,14 +1834,27 @@
             i % 4 ? "#276070" : "#9f3d6f",
           );
     }
+    const flyer = ((drift * 13) % 470) - 35,
+      train = ((drift * (12 + intensity * 3)) % 520) - 90;
+    rect(flyer, 44, 10, 3, "#44697c");
+    rect(flyer + 2, 43, 5, 1, "#ef6460");
+    rect(train, 104, 76, 6, "#172f42");
+    for (let i = 0; i < 8; i++)
+      rect(train + 4 + i * 9, 106, 5, 2, i % 2 ? "#48aeba" : "#935176");
     rect(286, 32, 18, 86, "#172a3d");
     rect(292, 16, 6, 22, "#29546b");
-    rect(294, 8, 2, 10, "#c14d78");
+    rect(294, 8, 2, 10, lightning ? "#f5f0d8" : "#c14d78");
     ctx.globalAlpha = 0.45;
     rect(45, 74, 46, 17, "#153c4d");
     text("零界", 68, 86, 7, "#4cd3d5", "center");
     ctx.globalAlpha = 1;
     rect(0, 119, W, 55, "#0c1a26");
+    for (let i = 0; i < 6; i++) {
+      const react = (Game.crowd || 0) * (i % 2 ? 4 : 7),
+        x = 42 + i * 58;
+      rect(x, 139 - react, 8, 13, "#091019");
+      rect(x + 2, 135 - react, 4, 4, "#192b36");
+    }
     rect(0, 144, W, 30, "#112531");
     for (let x = 0; x < W; x += 32) {
       rect(x, 145, 22, 2, "#376070");
@@ -1790,9 +1866,9 @@
       rect(x, 187, 25, 2, "#172d36");
       rect(x + 7, 191, 13, 1, "#24505a");
     }
-    for (let i = 0; i < 90; i++) {
-      let x = ((i * 47 + time * 22) % 410) - 10,
-        y = (i * 29 + time * 75) % 180;
+    for (let i = 0; i < 90 + intensity * 35; i++) {
+      let x = ((i * 47 + drift * (22 + intensity * 8)) % 410) - 10,
+        y = (i * 29 + drift * (75 + intensity * 12)) % 180;
       ctx.globalAlpha = 0.2 + (i % 3) * 0.13;
       rect(x, y, 1, (i % 4) + 2, "#94d9e3");
     }
@@ -2376,6 +2452,7 @@
     acc += dt;
     while (acc >= 1 / 60) {
       Game.update(1 / 60);
+      Game.crowd = Math.max(0, (Game.crowd || 0) - 0.045);
       for (let i = particles.length - 1; i >= 0; i--) {
         let p = particles[i];
         p.t -= 1 / 60;
@@ -2396,6 +2473,22 @@
     const out = [],
       ok = (name, v) => out.push({ name, pass: !!v }),
       unfreeze = () => (Game.freeze = 0);
+    ok(
+      "角色伤害表",
+      MOVES.chi.light1.d === 42 &&
+        MOVES.chi.heavy.d === 122 &&
+        MOVES.xuan.light1.d === 55 &&
+        MOVES.xuan.heavy.d === 150,
+    );
+    const assisted = new Fighter("chi", 100),
+      standard = new Fighter("chi", 280, true);
+    ok(
+      "玩家辅助收敛",
+      assisted.cfg.hp === 1026 &&
+        assisted.cfg.posture === 263 &&
+        assisted.damageMul === 1.1 &&
+        standard.cfg.hp === 950,
+    );
     let a = new Fighter("chi", 150),
       b = new Fighter("xuan", 170);
     a.state = b.state = "idle";
@@ -2428,6 +2521,15 @@
     ok("空能量禁止终结技", a.attack("ultimate") === false);
     a.energy = 100;
     ok("满能量允许终结技", a.attack("ultimate") === true && a.energy === 0);
+    const buffered = new Fighter("chi", 130);
+    buffered.state = "idle";
+    unfreeze();
+    buffered.attack("light1");
+    buffered.frame = 6;
+    buffered.update(1 / 60, b, { light: true });
+    buffered.frame = buffered.move.len;
+    buffered.update(1 / 60, b, {});
+    ok("八帧输入缓冲", buffered.move?.moveKey === "light2");
     Game.p = new Fighter("chi", 100);
     Game.e = new Fighter("xuan", 105);
     Game.separate();
