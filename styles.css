@@ -452,6 +452,25 @@ canvas {
   align-items: center;
   padding: clamp(24px, 3.5vw, 46px);
 }
+.title-layout::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.28;
+  background-image:
+    repeating-linear-gradient(104deg, transparent 0 22px, #9cebf2 23px 24px, transparent 25px 48px),
+    linear-gradient(90deg, transparent, #4bd6df18 48%, transparent 52%);
+  background-size: 150% 42px, 220% 100%;
+  animation: title-rain 0.62s steps(6, end) infinite, title-sweep 5.5s linear infinite;
+}
+@keyframes title-rain {
+  to { background-position: -24px 42px, 220% 0; }
+}
+@keyframes title-sweep {
+  to { filter: brightness(1.45); }
+}
 .title-hero {
   min-width: 0;
 }
@@ -591,6 +610,12 @@ canvas {
   inset: 6px;
   pointer-events: none;
   border: 1px solid #8fe4eb12;
+  background: linear-gradient(180deg, transparent 0 44%, #8ceaf019 48%, transparent 53%);
+  background-size: 100% 210%;
+  animation: event-scan 3.8s steps(14, end) infinite;
+}
+@keyframes event-scan {
+  to { background-position: 0 210%; }
 }
 .event-head {
   position: relative;
@@ -671,10 +696,27 @@ canvas {
   background: currentColor;
   clip-path: polygon(35% 0, 68% 0, 68% 10%, 82% 10%, 82% 31%, 72% 31%, 84% 52%, 100% 58%, 92% 70%, 72% 62%, 72% 100%, 48% 100%, 45% 70%, 31% 100%, 8% 100%, 22% 60%, 0 72%, 0 55%, 25% 42%, 18% 28%, 32% 20%);
   filter: drop-shadow(5px 5px 0 #02060c);
+  transform-origin: 50% 100%;
+  animation: chi-stance 1.15s steps(5, end) infinite;
 }
 .xuan-ticket .duelist-mark {
   width: 62px;
-  transform: scaleX(-1);
+  animation: xuan-stance 1.65s steps(5, end) infinite;
+}
+@keyframes chi-stance {
+  0%, 100% { transform: translate(0, 0) skewX(-2deg); filter: drop-shadow(5px 5px 0 #02060c); }
+  45% { transform: translate(2px, -3px) skewX(-7deg); filter: drop-shadow(7px 3px 0 #7e1d27); }
+  70% { transform: translate(-1px, -1px) skewX(2deg); }
+}
+@keyframes xuan-stance {
+  0%, 100% { transform: scaleX(-1) translateY(0) scaleY(1); filter: drop-shadow(-5px 5px 0 #02060c); }
+  50% { transform: scaleX(-1) translateY(-2px) scaleY(1.025); filter: drop-shadow(-7px 4px 0 #164b59); }
+}
+.versus-mark {
+  animation: versus-pulse 1.4s steps(3, end) infinite;
+}
+@keyframes versus-pulse {
+  50% { color: #fff7d8; text-shadow: -2px 0 var(--cyan), 2px 0 var(--red), 0 0 12px #fff5; }
 }
 .versus-mark {
   align-self: center;
@@ -1410,8 +1452,7 @@ canvas {
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  * {
-    transition: none !important;
-    animation: none !important;
-  }
+  .panel { transition: none !important; }
+  .title-layout::before { animation-duration: 1.4s, 9s; opacity: 0.16; }
+  .duelist-mark, .versus-mark { animation-duration: 2.4s; }
 }

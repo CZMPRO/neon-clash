@@ -30,7 +30,9 @@
     sfx: 0.7,
     shake: 1,
     contrast: false,
-    reducedFx: matchMedia("(prefers-reduced-motion: reduce)").matches,
+    // This switch only tones down flashes and camera impulses.  Ambient stage
+    // motion stays alive so the title never degrades into a static poster.
+    reducedFx: false,
   });
   const PROGRESS = readStore("neonProgress", {
     bestFloor: 0,
@@ -1804,7 +1806,7 @@
   }
   function background(time) {
     const intensity = SETTINGS.reducedFx ? 0 : Math.max(0, Game.round - 1),
-      drift = SETTINGS.reducedFx ? 0 : time,
+      drift = time,
       lightning =
         !SETTINGS.reducedFx && Math.sin(time * 0.31) > 0.994;
     rect(0, 0, W, H, lightning ? "#26354c" : "#07101d");
